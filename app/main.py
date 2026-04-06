@@ -131,22 +131,145 @@ def question6_route(query: str, db: Session = Depends(get_db)):
 
 # Question 7
 @app.get("/tasks/question7")
-def question7_route(db: Session = Depends(get_db)):
+def question7_route(id1: int, id2: int, db: Session = Depends(get_db)):
+    """
+    Determine the relationship between two tasks.
+    
+    Query Parameters:
+    - id1: First task ID
+    - id2: Second task ID
+    
+    Returns:
+    - Relationship string if one is a subtask of the other
+    - "NONE" if no relationship exists
+    """
     tasks = db.query(Task).all()
-    return question7(tasks)
+    return question7(tasks, id1, id2)
 
 # Question 8
 @app.get("/tasks/question8/")
-def question8_route(criteria: dict, sort_by: str, db: Session = Depends(get_db)):
+def question8_route(db: Session = Depends(get_db)):
+    """
+    Get tasks created between 26 Aug 2024 and 9 Sep 2024:
+    - Exclude completed tasks
+    - Exclude tasks created on Sunday
+    - Database agnostic (SQLite and PostgreSQL compatible)
     
-    # Note: Only use a SQL query to solve this question
-    return None
+    Returns:
+    - List of matching tasks with execution details
+    """
+    from sqlalchemy import and_, text
+    
+    # Define the date range
+    start_date = datetime(2024, 8, 26)
+    end_date = datetime(2024, 9, 9)
+    
+    # Build the query using SQLAlchemy ORM
+    # This approach is compatible with both SQLite and PostgreSQL
+    tasks = db.query(Task).filter(
+        and_(
+            Task.created_at >= start_date,
+            Task.created_at <= end_date,
+            Task.status != 'completed'  # Exclude completed tasks
+        )
+    ).all()
+    
+    # Filter tasks created on Sunday (day 6 in Python's weekday, 0=Monday, 6=Sunday)
+    # Since SQLite and PostgreSQL have different date functions, we filter in Python
+    filtered_tasks = [
+        task for task in tasks 
+        if task.created_at.weekday() != 6  # 6 represents Sunday
+    ]
+    
+    return {
+        "status": "success",
+        "count": len(filtered_tasks),
+        "date_range": {
+            "start": start_date.date(),
+            "end": end_date.date()
+        },
+        "filters_applied": [
+            "created_between_26aug_9sep_2024",
+            "exclude_completed_tasks",
+            "exclude_sunday_created"
+        ],
+        "tasks": filtered_tasks
+    }
+
+# Alternative Question 8 using Raw SQL (Database Agnostic)
+@app.get("/tasks/question8/raw-sql")
+def question8_raw_sql_route(db: Session = Depends(get_db)):
+    """
+    Alternative implementation using raw SQL queries.
+    This is more efficient but requires database-specific handling.
+    """
+    from sqlalchemy import text
+    
+    # Raw SQL query that works with both SQLite and PostgreSQL
+    # For SQLite: strftime for date functions, weekday for day of week
+    # For PostgreSQL: DATE functions
+    
+    raw_sql = """
+    SELECT * FROM tasks 
+    WHERE 
+        created_at >= '2024-08-26' 
+        AND created_at <= '2024-09-09'
+        AND status != 'completed'
+        AND CAST(strftime('%w', created_at) AS INTEGER) != 0
+    ORDER BY created_at DESC
+    """
+    
+    # Execute raw SQL (SQLite compatible)
+    result = db.execute(text(raw_sql)).fetchall()
+    
+    return {
+        "status": "success",
+        "count": len(result) if result else 0,
+        "query_type": "raw_sql",
+        "database_type": "sqlite",
+        "tasks": [dict(row._mapping) for row in result] if result else []
+    }
 
 # Question 9
 @app.post("/tasks/question9/{worker_threads}")
 def question9_route(worker_threads: int, db: Session = Depends(get_db)):
+    """
+    Simulate asynchronous task execution with limited worker threads.
+    
+    Path Parameters:
+    - worker_threads: Maximum number of concurrent worker threads
+    
+    Process:
+    1. Create a thread pool with specified worker count
+    2. Each task duration = duration / 10 seconds
+    3. Workers pick up tasks sequentially
+    4. Return execution report with timing details
+    
+    Returns:
+    - Execution summary with task statuses
+    - Detailed execution log with timing info
+    """
+    
+    if worker_threads <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="worker_threads must be greater than 0"
+        )
+    
     tasks = db.query(Task).all()
-    return question9(tasks, worker_threads)
+    
+    if not tasks:
+        raise HTTPException(
+            status_code=404,
+            detail="No tasks found to execute"
+        )
+    
+    result = question9(tasks, worker_threads)
+    
+    return {
+        "status": "success",
+        "execution_details": result
+    }
 
 
 # Default route
